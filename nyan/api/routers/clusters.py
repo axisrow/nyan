@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pymongo.collection import Collection
 
 from nyan.api.deps import get_clusters_col
@@ -62,9 +62,9 @@ def cluster_to_schema(cluster: Cluster) -> ClusterSchema:
 @router.get("", response_model=List[ClusterSchema])
 def list_clusters(
     issue: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0,
-    max_age_minutes: Optional[int] = None,
+    limit: int = Query(default=20, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    max_age_minutes: Optional[int] = Query(default=None, ge=1, le=43200),
     col: Collection = Depends(get_clusters_col),  # type: ignore[type-arg]
 ) -> List[ClusterSchema]:
     query = {}
@@ -77,8 +77,7 @@ def list_clusters(
         query["docs.issue"] = issue
 
     cursor = col.find(query).sort("create_time", -1).skip(offset).limit(limit)
-    clusters = [cluster_to_schema(Cluster.fromdict(d)) for d in cursor]
-    return clusters
+    return [cluster_to_schema(Cluster.fromdict(d)) for d in cursor]
 
 
 @router.get("/{clid}", response_model=ClusterSchema)

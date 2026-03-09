@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,8 @@ from nyan.api.schemas import ChannelSchema
 from nyan.channels import Channels
 
 router = APIRouter(prefix="/channels", tags=["channels"])
+
+_channels_lock = threading.Lock()
 
 
 def _load_channels(path: str) -> Channels:
@@ -39,35 +42,36 @@ def list_channels(
 
 
 def _set_disabled(name: str, disabled: bool, path: str) -> ChannelSchema:
-    with open(path) as f:
-        config = json.load(f)
+    with _channels_lock:
+        with open(path) as f:
+            config = json.load(f)
 
-    found = False
-    for ch in config["channels"]:
-        if ch["name"] == name:
-            ch["disabled"] = disabled
-            found = True
-            break
+        found = False
+        for ch in config["channels"]:
+            if ch["name"] == name:
+                ch["disabled"] = disabled
+                found = True
+                break
 
-    if not found:
-        raise HTTPException(status_code=404, detail=f"Channel '{name}' not found")
+        if not found:
+            raise HTTPException(status_code=404, detail=f"Channel '{name}' not found")
 
-    dir_name = os.path.dirname(os.path.abspath(path))
-    with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, suffix=".tmp") as tmp:
-        json.dump(config, tmp, ensure_ascii=False, indent=2)
-        tmp_path = tmp.name
-    shutil.move(tmp_path, path)
+        dir_name = os.path.dirname(os.path.abspath(path))
+        with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, suffix=".tmp") as tmp:
+            json.dump(config, tmp, ensure_ascii=False, indent=2)
+            tmp_path = tmp.name
+        shutil.move(tmp_path, path)
 
-    channels = _load_channels(path)
-    ch = channels[name]
-    return ChannelSchema(
-        name=ch.name,
-        alias=ch.alias,
-        issue=ch.issue,
-        disabled=ch.disabled,
-        groups=ch.groups,
-        master=ch.master,
-    )
+        channels = _load_channels(path)
+        ch = channels[name]
+        return ChannelSchema(
+            name=ch.name,
+            alias=ch.alias,
+            issue=ch.issue,
+            disabled=ch.disabled,
+            groups=ch.groups,
+            master=ch.master,
+        )
 
 
 @router.put("/{name}/disable", response_model=ChannelSchema)

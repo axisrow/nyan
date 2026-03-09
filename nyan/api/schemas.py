@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DocumentSchema(BaseModel):
@@ -15,12 +15,12 @@ class DocumentSchema(BaseModel):
     has_obscene: bool = False
     language: Optional[str] = None
     category: Optional[str] = None
-    category_scores: Dict[str, float] = {}
+    category_scores: Dict[str, float] = Field(default_factory=dict)
     issue: Optional[str] = None
-    groups: Dict[str, str] = {}
-    images: List[str] = []
-    videos: List[str] = []
-    links: List[str] = []
+    groups: Dict[str, str] = Field(default_factory=dict)
+    images: List[str] = Field(default_factory=list)
+    videos: List[str] = Field(default_factory=list)
+    links: List[str] = Field(default_factory=list)
     forward_from: Optional[str] = None
     reply_to: Optional[str] = None
 
@@ -46,7 +46,7 @@ class ClusterSchema(BaseModel):
     videos: List[str]
     messages: List[MessageIdSchema]
     docs: List[DocumentSchema]
-    diff: List[Dict[str, Any]] = []
+    diff: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ChannelSchema(BaseModel):
@@ -54,7 +54,7 @@ class ChannelSchema(BaseModel):
     alias: str = ""
     issue: Optional[str] = None
     disabled: bool = False
-    groups: Dict[str, str] = {}
+    groups: Dict[str, str] = Field(default_factory=dict)
     master: Optional[str] = None
 
 

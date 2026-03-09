@@ -23,16 +23,32 @@ def get_channels_path() -> str:
 
 
 def get_documents_col() -> Generator[Collection, None, None]:  # type: ignore[type-arg]
-    yield get_documents_collection(MONGO_CONFIG_PATH)
+    col = get_documents_collection(MONGO_CONFIG_PATH)
+    try:
+        yield col
+    finally:
+        col.database.client.close()
 
 
 def get_clusters_col() -> Generator[Collection, None, None]:  # type: ignore[type-arg]
-    yield get_clusters_collection(MONGO_CONFIG_PATH)
+    col = get_clusters_collection(MONGO_CONFIG_PATH)
+    try:
+        yield col
+    finally:
+        col.database.client.close()
 
 
 def get_annotated_documents_col() -> Generator[Collection, None, None]:  # type: ignore[type-arg]
-    yield get_annotated_documents_collection(MONGO_CONFIG_PATH)
+    col = get_annotated_documents_collection(MONGO_CONFIG_PATH)
+    try:
+        yield col
+    finally:
+        col.database.client.close()
 
 
 def get_topics_col() -> Generator[Collection, None, None]:  # type: ignore[type-arg]
-    yield get_topics_collection(MONGO_CONFIG_PATH)
+    col = get_topics_collection(MONGO_CONFIG_PATH)
+    try:
+        yield col
+    finally:
+        col.database.client.close()

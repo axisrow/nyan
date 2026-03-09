@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pymongo.collection import Collection
 
 from nyan.api.deps import get_documents_col
@@ -14,9 +14,9 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 @router.get("", response_model=List[DocumentSchema])
 def list_documents(
     channel_id: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0,
-    hours: int = 24,
+    limit: int = Query(default=20, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    hours: int = Query(default=24, ge=1, le=720),
     col: Collection = Depends(get_documents_col),  # type: ignore[type-arg]
 ) -> List[DocumentSchema]:
     min_ts = get_current_ts() - hours * 3600

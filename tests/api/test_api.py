@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from nyan.api.main import app
 from nyan.api import deps
+from nyan.api.routers import pipeline as pipeline_router
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +82,12 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def clear_overrides() -> Any:
+    yield
+    app.dependency_overrides.clear()
+
+
 # ---------------------------------------------------------------------------
 # GET /
 # ---------------------------------------------------------------------------
@@ -98,72 +105,71 @@ def test_root(client: TestClient) -> None:
 def test_list_clusters_empty(client: TestClient) -> None:
     col = _mock_col([])
     app.dependency_overrides[deps.get_clusters_col] = lambda: col
-    try:
-        resp = client.get("/clusters")
-        assert resp.status_code == 200
-        assert resp.json() == []
-    finally:
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
+    resp = client.get("/clusters")
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 def test_list_clusters_returns_schema(client: TestClient) -> None:
     cluster_dict = _make_cluster(clid=42, issue="sports")
     col = _mock_col([cluster_dict])
     app.dependency_overrides[deps.get_clusters_col] = lambda: col
-    try:
-        resp = client.get("/clusters")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) == 1
-        c = data[0]
-        assert c["clid"] == 42
-        assert "issues" in c
-        assert "docs" in c
-        assert len(c["docs"]) == 1
-        assert c["docs"][0]["url"] == "https://t.me/test/1"
-        assert c["docs"][0]["fetch_time"] == 1700000100
-        assert c["docs"][0]["has_obscene"] is False
-    finally:
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
+    resp = client.get("/clusters")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    c = data[0]
+    assert c["clid"] == 42
+    assert "issues" in c
+    assert "docs" in c
+    assert len(c["docs"]) == 1
+    assert c["docs"][0]["url"] == "https://t.me/test/1"
+    assert c["docs"][0]["fetch_time"] == 1700000100
+    assert c["docs"][0]["has_obscene"] is False
 
 
 def test_list_clusters_issue_filter_pushes_to_query(client: TestClient) -> None:
     """When issue != 'main', the filter must be passed to .find() as docs.issue."""
     col = _mock_col([])
     app.dependency_overrides[deps.get_clusters_col] = lambda: col
-    try:
-        resp = client.get("/clusters?issue=sports")
-        assert resp.status_code == 200
-        call_args = col.find.call_args
-        query = call_args[0][0]
-        assert query.get("docs.issue") == "sports"
-    finally:
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
+    resp = client.get("/clusters?issue=sports")
+    assert resp.status_code == 200
+    call_args = col.find.call_args
+    query = call_args[0][0]
+    assert query.get("docs.issue") == "sports"
 
 
 def test_list_clusters_issue_main_no_db_filter(client: TestClient) -> None:
     """issue=main should NOT add a docs.issue filter (all clusters have 'main')."""
     col = _mock_col([])
     app.dependency_overrides[deps.get_clusters_col] = lambda: col
-    try:
-        resp = client.get("/clusters?issue=main")
-        assert resp.status_code == 200
-        query = col.find.call_args[0][0]
-        assert "docs.issue" not in query
-    finally:
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
+    resp = client.get("/clusters?issue=main")
+    assert resp.status_code == 200
+    query = col.find.call_args[0][0]
+    assert "docs.issue" not in query
 
 
 def test_list_clusters_max_age_filter(client: TestClient) -> None:
     col = _mock_col([])
     app.dependency_overrides[deps.get_clusters_col] = lambda: col
-    try:
-        resp = client.get("/clusters?max_age_minutes=60")
-        assert resp.status_code == 200
-        query = col.find.call_args[0][0]
-        assert "create_time" in query
-    finally:
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
+    resp = client.get("/clusters?max_age_minutes=60")
+    assert resp.status_code == 200
+    query = col.find.call_args[0][0]
+    assert "create_time" in query
+
+
+def test_list_clusters_limit_upper_bound(client: TestClient) -> None:
+    col = _mock_col([])
+    app.dependency_overrides[deps.get_clusters_col] = lambda: col
+    resp = client.get("/clusters?limit=99999")
+    assert resp.status_code == 422
+
+
+def test_list_clusters_max_age_upper_bound(client: TestClient) -> None:
+    col = _mock_col([])
+    app.dependency_overrides[deps.get_clusters_col] = lambda: col
+    resp = client.get("/clusters?max_age_minutes=99999")
+    assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -175,23 +181,17 @@ def test_get_cluster_found(client: TestClient) -> None:
     col = MagicMock()
     col.find_one.return_value = cluster_dict
     app.dependency_overrides[deps.get_clusters_col] = lambda: col
-    try:
-        resp = client.get("/clusters/7")
-        assert resp.status_code == 200
-        assert resp.json()["clid"] == 7
-    finally:
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
+    resp = client.get("/clusters/7")
+    assert resp.status_code == 200
+    assert resp.json()["clid"] == 7
 
 
 def test_get_cluster_not_found(client: TestClient) -> None:
     col = MagicMock()
     col.find_one.return_value = None
     app.dependency_overrides[deps.get_clusters_col] = lambda: col
-    try:
-        resp = client.get("/clusters/9999")
-        assert resp.status_code == 404
-    finally:
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
+    resp = client.get("/clusters/9999")
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -201,30 +201,38 @@ def test_get_cluster_not_found(client: TestClient) -> None:
 def test_list_documents_empty(client: TestClient) -> None:
     col = _mock_col([])
     app.dependency_overrides[deps.get_documents_col] = lambda: col
-    try:
-        resp = client.get("/documents")
-        assert resp.status_code == 200
-        assert resp.json() == []
-    finally:
-        app.dependency_overrides.pop(deps.get_documents_col, None)
+    resp = client.get("/documents")
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 def test_list_documents_schema(client: TestClient) -> None:
     doc = _make_doc()
     col = _mock_col([doc])
     app.dependency_overrides[deps.get_documents_col] = lambda: col
-    try:
-        resp = client.get("/documents")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) == 1
-        d = data[0]
-        assert d["url"] == doc["url"]
-        assert d["fetch_time"] == doc["fetch_time"]
-        assert d["has_obscene"] is False
-        assert "category_scores" in d
-    finally:
-        app.dependency_overrides.pop(deps.get_documents_col, None)
+    resp = client.get("/documents")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    d = data[0]
+    assert d["url"] == doc["url"]
+    assert d["fetch_time"] == doc["fetch_time"]
+    assert d["has_obscene"] is False
+    assert "category_scores" in d
+
+
+def test_list_documents_limit_upper_bound(client: TestClient) -> None:
+    col = _mock_col([])
+    app.dependency_overrides[deps.get_documents_col] = lambda: col
+    resp = client.get("/documents?limit=99999")
+    assert resp.status_code == 422
+
+
+def test_list_documents_hours_upper_bound(client: TestClient) -> None:
+    col = _mock_col([])
+    app.dependency_overrides[deps.get_documents_col] = lambda: col
+    resp = client.get("/documents?hours=99999")
+    assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +267,6 @@ def test_list_channels(client: TestClient) -> None:
         assert data[0]["name"] == "test_ch"
         assert data[0]["disabled"] is False
     finally:
-        app.dependency_overrides.pop(deps.get_channels_path, None)
         os.unlink(tmp_path)
 
 
@@ -276,7 +283,6 @@ def test_disable_channel(client: TestClient) -> None:
             saved = json.load(f)
         assert saved["channels"][0]["disabled"] is True
     finally:
-        app.dependency_overrides.pop(deps.get_channels_path, None)
         os.unlink(tmp_path)
 
 
@@ -290,7 +296,6 @@ def test_enable_channel(client: TestClient) -> None:
         assert resp.status_code == 200
         assert resp.json()["disabled"] is False
     finally:
-        app.dependency_overrides.pop(deps.get_channels_path, None)
         os.unlink(tmp_path)
 
 
@@ -301,7 +306,6 @@ def test_disable_channel_not_found(client: TestClient) -> None:
         resp = client.put("/channels/nonexistent/disable")
         assert resp.status_code == 404
     finally:
-        app.dependency_overrides.pop(deps.get_channels_path, None)
         os.unlink(tmp_path)
 
 
@@ -317,15 +321,71 @@ def test_pipeline_status(client: TestClient) -> None:
     app.dependency_overrides[deps.get_documents_col] = lambda: docs_col
     app.dependency_overrides[deps.get_clusters_col] = lambda: clusters_col
     app.dependency_overrides[deps.get_mongo_config_path] = lambda: "configs/mongo_config.json"
+    resp = client.get("/pipeline/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["documents_count"] == 100
+    assert data["clusters_count"] == 10
+    assert "daemon_running" in data
+    assert "daemon_last_error" in data
+
+
+# ---------------------------------------------------------------------------
+# POST /pipeline/daemon
+# ---------------------------------------------------------------------------
+
+def test_run_daemon_conflict(client: TestClient) -> None:
+    """Returns 409 when daemon iteration is already running."""
+    app.dependency_overrides[deps.get_mongo_config_path] = lambda: "configs/mongo_config.json"
+    pipeline_router._daemon_state["running"] = True
     try:
-        resp = client.get("/pipeline/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["documents_count"] == 100
-        assert data["clusters_count"] == 10
-        assert "daemon_running" in data
-        assert "daemon_last_error" in data
+        resp = client.post("/pipeline/daemon")
+        assert resp.status_code == 409
+        assert "already running" in resp.json()["detail"]
     finally:
-        app.dependency_overrides.pop(deps.get_documents_col, None)
-        app.dependency_overrides.pop(deps.get_clusters_col, None)
-        app.dependency_overrides.pop(deps.get_mongo_config_path, None)
+        pipeline_router._daemon_state["running"] = False
+
+
+def test_run_daemon_starts(client: TestClient) -> None:
+    """Returns 200 and schedules a background task when not already running."""
+    app.dependency_overrides[deps.get_mongo_config_path] = lambda: "configs/mongo_config.json"
+    pipeline_router._daemon_state["running"] = False
+
+    with patch("nyan.api.routers.pipeline._run_daemon_iteration"):
+        resp = client.post("/pipeline/daemon")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "started"
+
+    # Reset state (background task won't actually run with TestClient in sync mode)
+    pipeline_router._daemon_state["running"] = False
+
+
+# ---------------------------------------------------------------------------
+# POST /pipeline/crawl
+# ---------------------------------------------------------------------------
+
+def test_run_crawl_conflict(client: TestClient) -> None:
+    """Returns 409 when crawl subprocess is already running."""
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = None  # process still running
+    pipeline_router._crawl_proc = mock_proc
+    try:
+        resp = client.post("/pipeline/crawl")
+        assert resp.status_code == 409
+        assert "already running" in resp.json()["detail"]
+    finally:
+        pipeline_router._crawl_proc = None
+
+
+def test_run_crawl_starts(client: TestClient) -> None:
+    """Returns 200 with pid when crawl is not already running."""
+    pipeline_router._crawl_proc = None
+    mock_proc = MagicMock()
+    mock_proc.pid = 12345
+    with patch("subprocess.Popen", return_value=mock_proc):
+        resp = client.post("/pipeline/crawl")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "started"
+    assert data["pid"] == "12345"
+    pipeline_router._crawl_proc = None

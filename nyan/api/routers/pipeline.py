@@ -1,9 +1,10 @@
+import os
 import subprocess
 import threading
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pymongo.collection import Collection
 
 from nyan.api.deps import get_clusters_col, get_documents_col, get_mongo_config_path
@@ -16,6 +17,15 @@ _daemon_state: Dict[str, Any] = {
     "last_run": None,
     "error": None,
 }
+_daemon_lock = threading.Lock()
+
+_CLIENT_CONFIG_PATH = os.environ.get("CLIENT_CONFIG_PATH", "configs/client_config.json")
+_ANNOTATOR_CONFIG_PATH = os.environ.get("ANNOTATOR_CONFIG_PATH", "configs/annotator_config.json")
+_CLUSTERER_CONFIG_PATH = os.environ.get("CLUSTERER_CONFIG_PATH", "configs/clusterer_config.json")
+_RANKER_CONFIG_PATH = os.environ.get("RANKER_CONFIG_PATH", "configs/ranker_config.json")
+_RENDERER_CONFIG_PATH = os.environ.get("RENDERER_CONFIG_PATH", "configs/renderer_config.json")
+_DAEMON_CONFIG_PATH = os.environ.get("DAEMON_CONFIG_PATH", "configs/daemon_config.json")
+_PIPELINE_CHANNELS_INFO_PATH = os.environ.get("CHANNELS_INFO_PATH", "channels.json")
 
 
 def _run_daemon_iteration(
@@ -30,7 +40,6 @@ def _run_daemon_iteration(
 ) -> None:
     from nyan.daemon import Daemon
 
-    _daemon_state["running"] = True
     _daemon_state["error"] = None
     try:
         daemon = Daemon(
@@ -50,7 +59,8 @@ def _run_daemon_iteration(
     except Exception as e:
         _daemon_state["error"] = str(e)
     finally:
-        _daemon_state["running"] = False
+        with _daemon_lock:
+            _daemon_state["running"] = False
         _daemon_state["last_run"] = datetime.utcnow().isoformat()
 
 
@@ -58,27 +68,28 @@ def _run_daemon_iteration(
 def run_daemon(
     background_tasks: BackgroundTasks,
     mongo_config_path: str = Depends(get_mongo_config_path),
-    client_config_path: str = "configs/client_config.json",
-    annotator_config_path: str = "configs/annotator_config.json",
-    clusterer_config_path: str = "configs/clusterer_config.json",
-    ranker_config_path: str = "configs/ranker_config.json",
-    renderer_config_path: str = "configs/renderer_config.json",
-    daemon_config_path: str = "configs/daemon_config.json",
-    channels_info_path: str = "channels.json",
 ) -> Dict[str, Any]:
-    if _daemon_state["running"]:
-        raise HTTPException(status_code=409, detail="Daemon iteration already running")
+    """Start a single daemon iteration in the background.
+
+    Config paths are read from environment variables (CLIENT_CONFIG_PATH,
+    ANNOTATOR_CONFIG_PATH, etc.) or fall back to defaults under configs/.
+    This endpoint only works correctly with a single-worker deployment.
+    """
+    with _daemon_lock:
+        if _daemon_state["running"]:
+            raise HTTPException(status_code=409, detail="Daemon iteration already running")
+        _daemon_state["running"] = True
 
     background_tasks.add_task(
         _run_daemon_iteration,
         mongo_config_path=mongo_config_path,
-        client_config_path=client_config_path,
-        annotator_config_path=annotator_config_path,
-        clusterer_config_path=clusterer_config_path,
-        ranker_config_path=ranker_config_path,
-        renderer_config_path=renderer_config_path,
-        daemon_config_path=daemon_config_path,
-        channels_info_path=channels_info_path,
+        client_config_path=_CLIENT_CONFIG_PATH,
+        annotator_config_path=_ANNOTATOR_CONFIG_PATH,
+        clusterer_config_path=_CLUSTERER_CONFIG_PATH,
+        ranker_config_path=_RANKER_CONFIG_PATH,
+        renderer_config_path=_RENDERER_CONFIG_PATH,
+        daemon_config_path=_DAEMON_CONFIG_PATH,
+        channels_info_path=_PIPELINE_CHANNELS_INFO_PATH,
     )
     return {"status": "started"}
 
@@ -89,10 +100,14 @@ _crawl_lock = threading.Lock()
 
 @router.post("/crawl")
 def run_crawl(
-    channels_file: str = "channels.json",
-    fetch_times: str = "crawler/fetch_times.json",
-    hours: int = 24,
+    channels_file: str = Query(default="channels.json"),
+    fetch_times: str = Query(default="crawler/fetch_times.json"),
+    hours: int = Query(default=24, ge=1, le=168),
 ) -> Dict[str, str]:
+    """Start the Scrapy crawler in a subprocess.
+
+    This endpoint only works correctly with a single-worker deployment.
+    """
     global _crawl_proc
     with _crawl_lock:
         if _crawl_proc and _crawl_proc.poll() is None:
