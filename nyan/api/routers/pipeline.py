@@ -27,7 +27,7 @@ _RENDERER_CONFIG_PATH = os.environ.get("RENDERER_CONFIG_PATH", "configs/renderer
 _DAEMON_CONFIG_PATH = os.environ.get("DAEMON_CONFIG_PATH", "configs/daemon_config.json")
 _PIPELINE_CHANNELS_INFO_PATH = os.environ.get("CHANNELS_INFO_PATH", "channels.json")
 
-_CRAWL_CHANNELS_FILE = os.environ.get("CHANNELS_INFO_PATH", "channels.json")
+_CRAWL_CHANNELS_FILE = _PIPELINE_CHANNELS_INFO_PATH
 _CRAWL_FETCH_TIMES = os.environ.get("FETCH_TIMES_PATH", "crawler/fetch_times.json")
 
 
@@ -139,11 +139,15 @@ def pipeline_status(
     clusters_col: Collection = Depends(get_clusters_col),  # type: ignore[type-arg]
     mongo_config_path: str = Depends(get_mongo_config_path),
 ) -> PipelineStatusSchema:
+    with _daemon_lock:
+        daemon_running = _daemon_state["running"]
+        daemon_last_run = _daemon_state["last_run"]
+        daemon_last_error = _daemon_state["error"]
     return PipelineStatusSchema(
         documents_count=documents_col.estimated_document_count(),
         clusters_count=clusters_col.estimated_document_count(),
         mongo_config_path=mongo_config_path,
-        daemon_running=_daemon_state["running"],
-        daemon_last_run=_daemon_state["last_run"],
-        daemon_last_error=_daemon_state["error"],
+        daemon_running=daemon_running,
+        daemon_last_run=daemon_last_run,
+        daemon_last_error=daemon_last_error,
     )
