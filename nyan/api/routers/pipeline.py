@@ -27,6 +27,9 @@ _RENDERER_CONFIG_PATH = os.environ.get("RENDERER_CONFIG_PATH", "configs/renderer
 _DAEMON_CONFIG_PATH = os.environ.get("DAEMON_CONFIG_PATH", "configs/daemon_config.json")
 _PIPELINE_CHANNELS_INFO_PATH = os.environ.get("CHANNELS_INFO_PATH", "channels.json")
 
+_CRAWL_CHANNELS_FILE = os.environ.get("CHANNELS_INFO_PATH", "channels.json")
+_CRAWL_FETCH_TIMES = os.environ.get("FETCH_TIMES_PATH", "crawler/fetch_times.json")
+
 
 def _run_daemon_iteration(
     mongo_config_path: str,
@@ -40,7 +43,7 @@ def _run_daemon_iteration(
 ) -> None:
     from nyan.daemon import Daemon
 
-    _daemon_state["error"] = None
+    error: Optional[str] = None
     try:
         daemon = Daemon(
             client_config_path=client_config_path,
@@ -57,11 +60,12 @@ def _run_daemon_iteration(
             posted_clusters_path=None,
         )
     except Exception as e:
-        _daemon_state["error"] = str(e)
+        error = str(e)
     finally:
         with _daemon_lock:
             _daemon_state["running"] = False
-        _daemon_state["last_run"] = datetime.utcnow().isoformat()
+            _daemon_state["last_run"] = datetime.utcnow().isoformat()
+            _daemon_state["error"] = error
 
 
 @router.post("/daemon")
@@ -100,12 +104,12 @@ _crawl_lock = threading.Lock()
 
 @router.post("/crawl")
 def run_crawl(
-    channels_file: str = Query(default="channels.json"),
-    fetch_times: str = Query(default="crawler/fetch_times.json"),
     hours: int = Query(default=24, ge=1, le=168),
 ) -> Dict[str, str]:
     """Start the Scrapy crawler in a subprocess.
 
+    File paths are read from environment variables (CHANNELS_INFO_PATH,
+    FETCH_TIMES_PATH) or fall back to defaults.
     This endpoint only works correctly with a single-worker deployment.
     """
     global _crawl_proc
@@ -118,14 +122,15 @@ def run_crawl(
                 "crawl",
                 "telegram",
                 "-a",
-                f"channels_file={channels_file}",
+                f"channels_file={_CRAWL_CHANNELS_FILE}",
                 "-a",
-                f"fetch_times={fetch_times}",
+                f"fetch_times={_CRAWL_FETCH_TIMES}",
                 "-a",
                 f"hours={hours}",
             ]
         )
-    return {"status": "started", "pid": str(_crawl_proc.pid)}
+        pid = _crawl_proc.pid
+    return {"status": "started", "pid": str(pid)}
 
 
 @router.get("/status", response_model=PipelineStatusSchema)
