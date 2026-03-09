@@ -15,7 +15,8 @@ CHANNELS_INFO_PATH = os.environ.get("CHANNELS_INFO_PATH", "channels.json")
 # MongoClient is thread-safe and manages an internal connection pool.
 _mongo_client: Optional[MongoClient] = None  # type: ignore[type-arg]
 _mongo_config: Optional[Dict[str, Any]] = None
-_mongo_init_lock = threading.Lock()
+# RLock because _get_mongo_client calls _get_config, both of which acquire this lock.
+_mongo_init_lock = threading.RLock()
 
 
 def _get_config() -> Dict[str, Any]:
