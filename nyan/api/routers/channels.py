@@ -79,6 +79,7 @@ def disable_channel(
     name: str,
     path: str = Depends(get_channels_path),
 ) -> ChannelSchema:
+    """Disable a channel. Intended for trusted internal use only — no authentication."""
     return _set_disabled(name, True, path)
 
 
@@ -87,4 +88,5 @@ def enable_channel(
     name: str,
     path: str = Depends(get_channels_path),
 ) -> ChannelSchema:
+    """Enable a channel. Intended for trusted internal use only — no authentication."""
     return _set_disabled(name, False, path)

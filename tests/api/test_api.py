@@ -88,6 +88,17 @@ def clear_overrides() -> Any:
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def reset_pipeline_state() -> Any:
+    pipeline_router._daemon_state["running"] = False
+    pipeline_router._daemon_state["last_run"] = None
+    pipeline_router._daemon_state["error"] = None
+    pipeline_router._crawl_proc = None
+    yield
+    pipeline_router._daemon_state["running"] = False
+    pipeline_router._crawl_proc = None
+
+
 # ---------------------------------------------------------------------------
 # GET /
 # ---------------------------------------------------------------------------
@@ -338,26 +349,18 @@ def test_run_daemon_conflict(client: TestClient) -> None:
     """Returns 409 when daemon iteration is already running."""
     app.dependency_overrides[deps.get_mongo_config_path] = lambda: "configs/mongo_config.json"
     pipeline_router._daemon_state["running"] = True
-    try:
-        resp = client.post("/pipeline/daemon")
-        assert resp.status_code == 409
-        assert "already running" in resp.json()["detail"]
-    finally:
-        pipeline_router._daemon_state["running"] = False
+    resp = client.post("/pipeline/daemon")
+    assert resp.status_code == 409
+    assert "already running" in resp.json()["detail"]
 
 
 def test_run_daemon_starts(client: TestClient) -> None:
     """Returns 200 and schedules a background task when not already running."""
     app.dependency_overrides[deps.get_mongo_config_path] = lambda: "configs/mongo_config.json"
-    pipeline_router._daemon_state["running"] = False
-
     with patch("nyan.api.routers.pipeline._run_daemon_iteration"):
         resp = client.post("/pipeline/daemon")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "started"
-
-    # Reset state (background task won't actually run with TestClient in sync mode)
-    pipeline_router._daemon_state["running"] = False
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "started"
 
 
 # ---------------------------------------------------------------------------
@@ -369,17 +372,13 @@ def test_run_crawl_conflict(client: TestClient) -> None:
     mock_proc = MagicMock()
     mock_proc.poll.return_value = None  # process still running
     pipeline_router._crawl_proc = mock_proc
-    try:
-        resp = client.post("/pipeline/crawl")
-        assert resp.status_code == 409
-        assert "already running" in resp.json()["detail"]
-    finally:
-        pipeline_router._crawl_proc = None
+    resp = client.post("/pipeline/crawl")
+    assert resp.status_code == 409
+    assert "already running" in resp.json()["detail"]
 
 
 def test_run_crawl_starts(client: TestClient) -> None:
     """Returns 200 with pid when crawl is not already running."""
-    pipeline_router._crawl_proc = None
     mock_proc = MagicMock()
     mock_proc.pid = 12345
     with patch("subprocess.Popen", return_value=mock_proc):
@@ -388,4 +387,3 @@ def test_run_crawl_starts(client: TestClient) -> None:
     data = resp.json()
     assert data["status"] == "started"
     assert data["pid"] == "12345"
-    pipeline_router._crawl_proc = None
